@@ -4,7 +4,7 @@
 SoftwareSerial wireless(4, 5); // RX, TX
 
 long unsigned int shutdowntimer;
-bool flag, blinkpowerstate, shutdown;
+bool flag, blinkpowerstate;
 String options[6];
 
 class Comms
@@ -347,11 +347,19 @@ void remotemenutree(String target)
         comms.broadcast(__DATE__);
         break;
     case 2:
-        int shutdowntime = remoteselnum(F("Schedule Shutdown"), 0, 60, 0, target);
-        if (shutdowntime != -1)
+        if (shutdowntimer == 0)
         {
-            shutdowntimer = 60000 * shutdowntime + millis();
-            comms.broadcast("shutdown scheduled");
+            int shutdowntime = remoteselnum(F("Schedule Shutdown"), 0, 60, -1, target);
+            if (shutdowntime != -1)
+            {
+                shutdowntimer = 60000 * shutdowntime + millis();
+                comms.broadcast(F("shutdown scheduled"));
+            }
+        }
+        else
+        {
+            shutdowntimer = 0;
+            comms.broadcast(F("shutdown cancelled"));
         }
         break;
     }
@@ -359,8 +367,13 @@ void remotemenutree(String target)
 
 int remoteselnum(String title, int mini, int maxi, int defaultint, String target)
 {
-    // <source> <target> selnum "<title>" <mini> <maxi> <defaultint>
-    comms.send(target, "selnum \"" + title + "\" " + String(mini) + " " + String(maxi) + " " + String(defaultint));
+    // <source> <target> set <index> <value>
+    comms.send(target, "set 0 \"" + String(title) + "\"");
+    comms.send(target, "set 1 " + String(mini));
+    comms.send(target, "set 2 " + String(maxi));
+    comms.send(target, "set 3 " + String(defaultint));
+    // <source> <target> selnum
+    comms.send(target, "selnum");
 
     // listen for response
     long unsigned int timeout = millis() + 30000;
@@ -376,6 +389,10 @@ int remoteselnum(String title, int mini, int maxi, int defaultint, String target
                 if (comms.pharse(comms.incomingmessage, 2) == "respond")
                 {
                     return comms.pharse(comms.incomingmessage, 3).toInt();
+                }
+                else
+                {
+                    return -1;
                 }
             }
         }
@@ -409,7 +426,7 @@ int remotemenu(int optcount, String title, String opts[], String target)
                 if (comms.pharse(comms.incomingmessage, 2) == "respond")
                 {
                     return comms.pharse(comms.incomingmessage, 3).toInt();
-                }
+                }             
             }
         }
     }
@@ -470,20 +487,11 @@ void commandtree(String command)
 
 void blinkpower()
 {
-    // shutdown check background process, checks if it's time to shutdown
-    if (shutdowntimer != 0)
-    {
-        if (millis() > shutdowntimer)
-        {
-            shutdown = true;
-            comms.broadcast("shutdown initiated");
-        }
-    }
-
     // change the state of the power pin to keep the chip awake
-    if (shutdown)
+    if (shutdowntimer != 0 && millis() > shutdowntimer)
     {
         digitalWrite(7, LOW);
+        comms.broadcast("shutdown initiated");
     }
     else
     {
